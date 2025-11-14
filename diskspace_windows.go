@@ -65,7 +65,8 @@ func getDiskFreeSpaceEx(rootPath string) (int64, error) {
 
 	var freeBytesAvailable, totalNumberOfBytes, totalNumberOfFreeBytes uint64
 
-	// Call GetDiskFreeSpaceExW
+	// Call GetDiskFreeSpaceExW using unsafe pointers (necessary for Windows API)
+	// This is a justified use of unsafe for platform-specific interop
 	r1, _, err := getDiskFreeSpaceEx.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(&freeBytesAvailable)),
@@ -74,7 +75,7 @@ func getDiskFreeSpaceEx(rootPath string) (int64, error) {
 	)
 
 	if r1 == 0 {
-		return 0, err
+		return 0, fmt.Errorf("GetDiskFreeSpaceEx failed: %w", err)
 	}
 
 	// Return free bytes available to the user (considers quotas)

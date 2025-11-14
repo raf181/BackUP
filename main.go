@@ -598,7 +598,12 @@ func copyAll(ctx context.Context, pairs [][2]string, manifestPath string, worker
 			}
 		}()
 	}
-	mf, _ := os.OpenFile(manifestPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	mf, err := os.OpenFile(manifestPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		// Log error but continue - manifest is optional
+		fmt.Fprintf(os.Stderr, "warning: failed to open manifest file: %v\n", err)
+		return copied, errorsN
+	}
 	mw := bufio.NewWriter(mf)
 	writeManifest := func(rec ManifestRec) {
 		b, _ := json.Marshal(rec)

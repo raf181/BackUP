@@ -1,6 +1,6 @@
 module backuper
 
-go 1.21
+go 1.21.11
 
 require (
 	github.com/charmbracelet/bubbletea v0.27.0
