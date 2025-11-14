@@ -1,4 +1,6 @@
-
+*.exe
+backuper
+backuper.exe
 
 #Ignore insiders AI rules
 .github\instructions\codacy.instructions.md
