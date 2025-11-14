@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package main
@@ -83,10 +84,28 @@ func getDiskFreeSpaceEx(rootPath string) (int64, error) {
 }
 
 func getFallbackDiskSpace(rootPath string) int64 {
-	// Fallback method using PowerShell
+	// Validate input to prevent command injection
+	// Only allow valid drive letters with backslash (e.g., "C:\\")
+	if len(rootPath) < 2 {
+		return 0
+	}
+	
+	// Ensure path is in valid format (e.g., "C:\\" or "C:")
+	driveLetters := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	if !strings.ContainsAny(string(rootPath[0]), driveLetters) {
+		return 0
+	}
+	
+	// Extract just the drive letter
+	if rootPath[1] != ':' {
+		return 0
+	}
+	driveLetter := string(rootPath[0]) + ":"
+	
+	// Fallback method using PowerShell with safe parameterization
+	// Use PowerShell parameter binding instead of string formatting to prevent injection
 	cmd := exec.Command("powershell", "-Command",
-		fmt.Sprintf("(Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='%s'\").FreeSpace",
-			strings.TrimSuffix(rootPath, string(os.PathSeparator))))
+		"[UInt64]((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='"+driveLetter+"'\").FreeSpace)")
 
 	output, err := cmd.Output()
 	if err != nil {

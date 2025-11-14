@@ -113,7 +113,18 @@ func main() {
 		destDir = "backup_" + time.Now().Format("20060102_150405")
 	}
 	if destDir != "" {
+		// Validate destSubdir to prevent path traversal attacks
+		// It should not contain ".." or start with "/" or "\\"
+		if strings.Contains(destDir, "..") || strings.HasPrefix(destDir, string(os.PathSeparator)) || strings.HasPrefix(destDir, "/") {
+			fail(fmt.Errorf("invalid destination subdirectory: path traversal detected"))
+		}
 		destDir = filepath.Join(usbRoot, destDir)
+		// Verify the result is still under usbRoot after joining
+		realDestDir, err := filepath.Abs(destDir)
+		realUsbRoot, err2 := filepath.Abs(usbRoot)
+		if err != nil || err2 != nil || !strings.HasPrefix(realDestDir, realUsbRoot) {
+			fail(fmt.Errorf("destination directory is outside USB root"))
+		}
 	} else {
 		destDir = usbRoot
 	}
@@ -123,6 +134,16 @@ func main() {
 	profilePath := *profile
 	if !filepath.IsAbs(profilePath) {
 		profilePath = filepath.Join(usbRoot, profilePath)
+	}
+	// Validate profile path to prevent path traversal when used with USB root
+	if !filepath.IsAbs(*profile) {
+		// If relative path, ensure it doesn't escape usbRoot
+		realProfilePath, err := filepath.Abs(profilePath)
+		realUsbRoot, err2 := filepath.Abs(usbRoot)
+		if err != nil || err2 != nil || !strings.HasPrefix(realProfilePath, realUsbRoot) {
+			fmt.Fprintf(os.Stderr, "warning: profile path escapes USB root, using default\n")
+			profilePath = filepath.Join(usbRoot, "importance_profile.json")
+		}
 	}
 	tiers, _ := loadImportanceProfile(profilePath)
 
@@ -606,9 +627,20 @@ func copyAll(ctx context.Context, pairs [][2]string, manifestPath string, worker
 	}
 	mw := bufio.NewWriter(mf)
 	writeManifest := func(rec ManifestRec) {
-		b, _ := json.Marshal(rec)
-		mw.Write(b)
-		mw.WriteByte('\n')
+		b, err := json.Marshal(rec)
+		if err != nil {
+			// Log JSON marshaling error but continue
+			fmt.Fprintf(os.Stderr, "warning: failed to marshal manifest record: %v\n", err)
+			return
+		}
+		if _, err := mw.Write(b); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write manifest: %v\n", err)
+			return
+		}
+		if err := mw.WriteByte('\n'); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write manifest newline: %v\n", err)
+			return
+		}
 	}
 	worker := func() {
 		defer wg.Done()
@@ -648,8 +680,12 @@ func copyAll(ctx context.Context, pairs [][2]string, manifestPath string, worker
 	close(jobs)
 	wg.Wait()
 	close(stopCh)
-	mw.Flush()
-	mf.Close()
+	if err := mw.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to flush manifest: %v\n", err)
+	}
+	if err := mf.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to close manifest file: %v\n", err)
+	}
 	return copied, errorsN
 }
 
