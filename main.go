@@ -57,6 +57,9 @@ var (
 	excludedGlobs = []string{
 		"*/.Trash/*", "*/.local/share/Trash/*", "*/.thumbnails/*", "*/Temp/*", "*/tmp/*",
 	}
+	onedriveFolders = []string{
+		"OneDrive", "OneDrive - Personal", "OneDrive - Business",
+	}
 )
 
 // fastSSDMode toggles runtime heuristics for very fast SSD/NVMe devices.
@@ -78,6 +81,7 @@ func main() {
 	noProg := flag.Bool("no-progress", false, "Disable progress UI/log updates (max throughput mode)")
 	fastSSD := flag.Bool("fast-ssd", false, "Optimize copy heuristics for very fast SSD/NVMe (fewer syscalls on large files)")
 	boost := flag.Bool("boost", false, "High-performance mode: raise process priority, enable fast-ssd heuristics, keep GUI")
+	noOneDrive := flag.Bool("no-onedrive", false, "Exclude OneDrive folders and variations from scan")
 	flag.Parse()
 
 	if *noProg {
@@ -154,6 +158,12 @@ func main() {
 	// Parse sources and excludes
 	sources := splitNonEmpty(*sourcesFlag)
 	excludes := append([]string{}, excludedGlobs...)
+	if *noOneDrive {
+		// Add OneDrive folder patterns when --no-onedrive flag is set
+		for _, folder := range onedriveFolders {
+			excludes = append(excludes, "*/"+folder, "*/"+folder+"/*")
+		}
+	}
 	excludes = append(excludes, splitNonEmpty(*excludeFlag)...)
 
 	// Create cancellable context and handle Ctrl+C
