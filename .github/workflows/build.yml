@@ -1,0 +1,139 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build Binary
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            output: backuper
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            output: backuper
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            output: backuper
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            output: backuper
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            output: backuper.exe
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            output: backuper.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -ldflags="-s -w" -trimpath -o ${{ matrix.output }} .
+
+      - name: Install UPX (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx
+
+      - name: Install UPX (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install upx
+
+      - name: Install UPX (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install upx -y
+
+      - name: Compress with UPX
+        run: upx -9 --best ${{ matrix.output }} -o ${{ matrix.output }}.tmp && mv ${{ matrix.output }}.tmp ${{ matrix.output }}
+        continue-on-error: true
+
+      - name: Rename for release
+        run: |
+          mkdir -p dist
+          cp ${{ matrix.output }} dist/backuper-${{ matrix.goos }}-${{ matrix.goarch }}${{ endsWith(matrix.output, '.exe') && '.exe' || '' }}
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backuper-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find all-artifacts -type f -name "backuper*" -exec mv {} release/ \;
+          cd release && ls -lh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: Test Binary
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backuper-linux-amd64
+          path: ./
+
+      - name: Make executable
+        run: chmod +x backuper-linux-amd64
+
+      - name: Test help flag
+        run: ./backuper-linux-amd64 -h
