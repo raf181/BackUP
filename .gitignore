@@ -2,5 +2,27 @@
 backuper
 backuper.exe
 
-#Ignore insiders AI rules
-.github\instructions\codacy.instructions.md
+# Build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+Thumbs.db
+.Thumbs.db
+
+# Rust
+*.pdb
+*.dSYM/
+debug/
+

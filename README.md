@@ -1,166 +1,312 @@
-# 🔄 BackUP
+# BackUP - TeraCopy-Style File Transfer Engine
 
-> Fast, intelligent USB backup tool with importance-based file prioritization
+A robust, headless file transfer engine for Windows written in Rust. Designed as the foundation for a full-featured GUI application, but this milestone provides a working CLI and library that can be integrated into other tools.
 
-[![Build & Release](https://github.com/raf181/BackUP/actions/workflows/build.yml/badge.svg)](https://github.com/raf181/BackUP/actions/workflows/build.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+## Features (Milestone 1)
 
-## Features
+- ✅ Recursive copy and move of files and directories
+- ✅ Per-file state tracking (Pending, Copying, Done, Skipped, Failed)
+- ✅ Error resilience: single-file errors don't kill the job
+- ✅ Configurable overwrite policies (Skip, Overwrite, SmartUpdate, Ask)
+- ✅ Progress reporting via callback trait (CLI and future GUI compatible)
+- ✅ Comprehensive error handling with recovery
+- ✅ Long path support (\\?\\ prefix for >260 chars)
+- ✅ Unicode filename support
+- ✅ CLI binary for testing and manual use
+- ✅ Library API for future UIs and tools
 
-- ⚡ **Fast scanning** - Efficient directory traversal with concurrent file processing
-- 🎯 **Smart prioritization** - Organize backups by file importance (configurable tiers)
-- 💾 **Adaptive selection** - Fills USB space intelligently, prioritizing important files
-- 🔄 **Resume-capable** - Skip already-copied files automatically
-- 🎨 **Interactive TUI** - Beautiful, real-time progress visualization
-- 🛡️ **Safe** - Auto-excludes USB device, skips symlinks, validates file integrity
-- 🌍 **Cross-platform** - Linux, Windows (Go 1.21+)
+## Planned Features (Future Milestones)
 
-## Quick Start
+- Checksums and file integrity verification
+- Multi-job queuing and scheduling
+- SQLite persistence (history, resume interrupted jobs)
+- Shell integration (context menus, drag-and-drop)
+- Advanced filtering (include/exclude patterns)
+- Bandwidth throttling
+- ACL and alternate data stream (ADS) preservation
 
-### Download Pre-built Binary
+## System Requirements
 
-Get the latest release from [Releases](https://github.com/raf181/BackUP/releases)
+- **OS**: Windows 10 or later (x86_64)
+- **Rust**: 1.70+ (stable)
+- **Dependencies**: Minimal (clap, uuid, chrono, and a few others)
 
-### Basic Usage
+## Building
+
+### Build the Engine Library and CLI
 
 ```bash
-# Preview what will be backed up
-./backuper --sources "$HOME" --dry-run
-
-# Backup your home directory
-./backuper --sources "$HOME"
-
-# Backup multiple directories
-./backuper --sources "/home/user/Documents,/home/user/Pictures"
+cd BackUP
+cargo build --release
 ```
 
-## Configuration
+The CLI binary will be at `target/release/cli.exe` (Windows).
 
-### Importance Tiers
+### Build Individual Crates
 
-Edit `importance_profile.json` to customize file priorities:
+```bash
+# Engine library only
+cargo build -p engine --release
 
-```json
-{
-  "tiers": [
-    {
-      "name": "Documents",
-      "priority": 100,
-      "patterns": ["*.pdf", "*.doc", "*.docx", "*.txt"]
-    },
-    {
-      "name": "Photos",
-      "priority": 90,
-      "patterns": ["*.jpg", "*.png", "*.heic"]
+# CLI binary only
+cargo build -p cli --release
+```
+
+## Running the CLI
+
+### Basic Copy
+
+```bash
+./transfer --src "C:\Users\Alice\Documents" --dst "D:\Backup"
+```
+
+### With Options
+
+```bash
+# Skip existing files
+./transfer --src "C:\data" --dst "D:\backup" --overwrite-policy skip
+
+# Overwrite all
+./transfer --src "C:\data" --dst "D:\backup" --overwrite-policy overwrite
+
+# Smart update (overwrite if newer or different size)
+./transfer --src "C:\data" --dst "D:\backup" --overwrite-policy smart-update
+
+# Move instead of copy
+./transfer --src "C:\data" --dst "D:\backup" --mode move
+```
+
+### Help
+
+```bash
+./transfer --help
+./transfer --version
+```
+
+## Usage as a Library
+
+```rust
+use engine::{create_job, plan_job, run_job, Mode, OverwritePolicy, ProgressCallback, FileItem, TransferJob};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create a job
+    let mut job = create_job(
+        "C:\\source",
+        "D:\\destination",
+        Mode::Copy,
+        OverwritePolicy::Skip,
+    )?;
+
+    // Plan (enumerate files)
+    plan_job(&mut job)?;
+    println!("Will copy {} files", job.files.len());
+
+    // Create a progress reporter
+    let progress = MyProgressReporter;
+
+    // Run the job
+    run_job(&mut job, Some(&progress))?;
+
+    // Check results
+    for file in &job.files {
+        if file.state == FileState::Failed {
+            println!("Failed: {} - {}", file.source_path.display(), 
+                     file.error_message.as_deref().unwrap_or("unknown"));
+        }
     }
-  ]
+
+    Ok(())
+}
+
+// Implement the ProgressCallback trait for your UI
+struct MyProgressReporter;
+
+impl ProgressCallback for MyProgressReporter {
+    fn on_job_started(&self, job: &TransferJob) {
+        println!("Starting transfer of {} bytes", job.total_bytes_to_copy);
+    }
+
+    fn on_file_started(&self, job: &TransferJob, file_index: usize, file: &FileItem) {
+        println!("Copying: {}", file.source_path.display());
+    }
+
+    fn on_file_progress(&self, job: &TransferJob, file_index: usize, bytes_this_file: u64) {
+        // Update UI or progress bar
+    }
+
+    fn on_file_completed(&self, job: &TransferJob, file_index: usize, file: &FileItem) {
+        println!("Done: {}", file.source_path.display());
+    }
+
+    fn on_job_completed(&self, job: &TransferJob) {
+        println!("Transfer complete");
+    }
 }
 ```
 
-Higher priority files are backed up first.
+## Architecture
 
-## Command-line Options
+The project is organized as a Rust workspace with two crates:
 
-```txt
--sources string
-    Comma-separated source directories (default: home directory)
+### `engine/` - Core Library
 
--objective string
-    Selection strategy: count (maximize file count) or space (maximize data) (default: "count")
+The heart of the transfer logic. Responsible for:
+- File enumeration and path handling
+- Copy operations and error recovery
+- Job orchestration and state management
+- Progress reporting via callbacks
 
--exclude string
-    Comma-separated glob patterns to exclude (e.g., "*/tmp/*,*/.cache/*")
+**Modules:**
+- `model.rs` - Type definitions (Job, FileItem, enums)
+- `error.rs` - Error handling (EngineError type)
+- `fs_ops.rs` - Filesystem operations (enumerate, copy, mkdir)
+- `job.rs` - Job creation, planning, and execution
+- `progress.rs` - ProgressCallback trait definition
 
--profile string
-    Path to importance_profile.json (default: "importance_profile.json")
+### `cli/` - Command-Line Interface
 
--dest-subdir string
-    Create backup in USB subdirectory (auto-named if empty)
+A simple CLI for testing and manual use. Depends on the engine library.
 
--workers int
-    Concurrent copy workers (default: CPU core count)
+- Argument parsing (clap)
+- Progress reporting to stdout
+- Exit codes and error reporting
 
--reserve int64
-    Bytes to reserve free on USB (default: 0)
+## Design Principles
 
--dry-run
-    Preview selection without copying
+1. **Resilience**: Single file errors don't crash the job. Errors are recorded per-file and reported at the end.
 
--resume
-    Resume into existing destination directory
+2. **Extensibility**: Progress is reported via a trait, allowing multiple UIs to plug in without modifying the engine.
 
--no-progress
-    Disable interactive TUI (console mode only)
+3. **Testability**: Core logic is separated from CLI. Each module can be tested independently.
 
--fast-ssd
-    Optimize for high-speed storage
+4. **Windows-First**: Optimized for Windows (10+) with proper handling of long paths and Unicode.
 
--boost
-    High-performance mode (raise priority, enable fast-ssd heuristics)
+5. **Synchronous**: No async I/O in Milestone 1. Keeps code simple and testable. Async can be added later if needed.
+
+## Error Handling
+
+### Job-Level Errors
+
+These stop the job early and are returned as `EngineError`:
+- Source directory not found
+- Destination not accessible
+- Root enumeration failed
+- Path too long or invalid
+
+### File-Level Errors
+
+These are recorded in the FileItem but **do not stop the job**:
+- Read/write failures
+- Directory creation failures
+- Permission denied
+- Disk full
+
+The job completes successfully even if some files fail. The caller inspects `job.files` to find failures.
+
+**Example:**
+```rust
+for file in &job.files {
+    if file.state == FileState::Failed {
+        eprintln!("Failed: {} ({})", 
+                  file.source_path.display(),
+                  file.error_message.as_deref().unwrap_or("unknown error"));
+    }
+}
 ```
 
-## Examples
+## Testing
+
+### Unit Tests
 
 ```bash
-# Dry run to see what gets backed up
-./backuper --sources "$HOME" --dry-run
-
-# Backup with space-filling strategy (larger files first)
-./backuper --sources "$HOME" --objective space
-
-# Exclude caches and temp files
-./backuper --sources "$HOME" --exclude "*/cache/*,*/tmp/*"
-
-# Resume previous backup
-./backuper --sources "$HOME" --resume --dest-subdir backup_20231115_143022
-
-# Reserve 1 GB free space on USB
-./backuper --sources "$HOME" --reserve 1073741824
-
-# Boost mode for fast SSDs
-./backuper --sources "$HOME" --boost
+cargo test -p engine --lib
 ```
 
-## Building from Source
+Tests are located in each module and cover:
+- Enumeration (directory structure parsing)
+- Overwrite policies (Skip, Overwrite, SmartUpdate)
+- File copying with metadata preservation
+- Error handling and recovery
 
-Requires Go 1.21 or later:
+### Integration Tests
 
 ```bash
-git clone https://github.com/raf181/BackUP.git
-cd BackUP
-go build -ldflags="-s -w" -trimpath -o backuper
+cargo test -p engine --test '*'
 ```
 
-### Creating Optimized Binaries
+Real filesystem tests using temporary directories:
+- Copy flat and nested directory structures
+- Handle various overwrite policies
+- Simulate and recover from errors
+- Verify progress callbacks are invoked in correct order
+
+### Manual Testing
+
+For realistic scenarios with large files and deep paths:
 
 ```bash
-# Strip debug symbols
-go build -ldflags="-s -w" -trimpath -o backuper
+# Create a test source directory
+mkdir C:\test_source
+# ... add some files ...
 
-# Further compress with UPX
-upx -9 --best backuper -o backuper.compressed
+# Run transfer
+./transfer --src C:\test_source --dst C:\test_dest
+
+# Verify results
+tree C:\test_dest
 ```
 
-## How It Works
+## Exit Codes
 
-1. **Scan** - Recursively scan source directories with importance tier matching
-2. **Select** - Intelligently select files to maximize importance within available space
-3. **Plan** - Build manifest of source→destination mappings
-4. **Copy** - Concurrently copy files with progress tracking and error handling
-5. **Verify** - Log manifest with timestamps and status for each file
+- **0** - Success: All files copied, no errors
+- **1** - Partial success: Some files failed or skipped
+- **2** - Fatal error: Job could not start (source not found, access denied, etc.)
 
-## Safety Features
+## Performance
 
-- ✅ Auto-excludes this USB from scanning
-- ✅ Skips symlinks and special files
-- ✅ Skips already-copied files with matching size
-- ✅ Atomic operations (using `.part` temp files)
-- ✅ Detailed manifest logging (`backup-manifest.jsonl`)
+Milestone 1 targets:
+- **Copy speed**: ~50-200 MB/s (depends on source/destination speeds)
+- **Enumeration**: <1 second for 10,000 files
+- **Memory**: <100 MB even for jobs with 100,000+ files
 
-## License
+See `docs/PERFORMANCE.md` for benchmarks and optimization guidance.
 
-MIT License - see LICENSE file for details
+## Documentation
+
+- **DESIGN.md** - Complete design document (architecture, algorithms, data model)
+- **IMPLEMENTATION_SUMMARY.md** - Quick reference for developers
 
 ## Contributing
 
-Contributions welcome! Feel free to open issues and submit pull requests.
+See `CONTRIBUTING.md` for development guidelines.
+
+## License
+
+This project is provided as-is. See LICENSE for details.
+
+## Roadmap
+
+### Milestone 1 (Current) ✅
+- Core file transfer engine
+- CLI for testing
+- Error handling and recovery
+- Progress reporting
+
+### Milestone 2 (Planned)
+- Checksum verification
+- Pause/resume (via SQLite persistence)
+- Better progress reporting (bandwidth, ETA)
+
+### Milestone 3 (Planned)
+- GUI (WinForms or WPF)
+- Multi-job queuing
+- Advanced filtering
+
+### Milestone 4+ (Future)
+- Shell integration
+- ACL/ADS preservation
+- Network transfers
+
+## Support
+
+For issues, feature requests, or questions, please open an issue on GitHub.

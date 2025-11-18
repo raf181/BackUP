@@ -1,0 +1,18 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+filetime = "0.2"
+md5 = "0.7"
+sha2 = "0.10"
+blake3 = "1.5"
+
+[dev-dependencies]
+tempfile = "3.8"
